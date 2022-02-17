@@ -28,7 +28,7 @@ def print(text):
     if not isinstance(text, str):
         text = str(text)
 
-    real_print("#INTERPRETER#" + text + "#ENDPARSE#", end='', flush=True)
+    real_print(f'#INTERPRETER#{text}#ENDPARSE#', end='', flush=True)
 
 def parseCall(*arg):
     result = ""
@@ -36,17 +36,17 @@ def parseCall(*arg):
         if len(arg) > 1:
             eval_result = eval(arg[0] + "(\""+'","'.join(arg[1:])+"\")")
         else:
-            eval_result = eval(arg[0] + "()")
+            eval_result = eval(f'{arg[0]}()')
 
         if isinstance(eval_result, numbers.Number) and not isinstance(eval_result, bool):
             result = str(eval_result)
         else:
             result = "\"" + str(eval_result) + "\""
-        
+
     except (RuntimeError, TypeError, NameError):
         result = "\"" + "Unexpected error:" + str(sys.exc_info()) + "\""
-        
-    real_print("#PYTHONFUNCTION#"+result+"#ENDPARSE#", flush=True, end='')
+
+    real_print(f'#PYTHONFUNCTION#{result}#ENDPARSE#', flush=True, end='')
 
 def cell(cell, value = None):
     if value is not None:
@@ -63,7 +63,7 @@ def show():
         encoded_string = base64.b64encode(image_file.read())
 
     image_string = str(encoded_string)
-    data = {'arguments': ["IMAGE", image_string[2:len(image_string)-1]]}
+    data = {'arguments': ["IMAGE", image_string[2:-1]]}
     data = ''.join(['#IMAGE#', json.dumps(data),'#ENDPARSE#'])
 
     # remove to clean up
@@ -99,19 +99,14 @@ def indexToLetters(index):
 
     while leftOver > 0:
         remainder = leftOver % base
-        
+
         if remainder == 0:
             remainder = base
 
         columns.insert(0, int(remainder))
         leftOver = (leftOver - remainder) / base
 
-    buff = ""
-
-    for x in columns:
-        buff += chr(x + 64)
-
-    return buff
+    return "".join(chr(x + 64) for x in columns)
 
 def cell_range_to_indexes(cell_range):
     references = []
@@ -125,11 +120,12 @@ def cell_range_to_indexes(cell_range):
     cell2Column = getReferenceColumnIndex(cells[1])
 
     for x in range(cell1Column, cell2Column+1):
-        columnReferences = []
-        for y in range(cell1Row, cell2Row+1):
-            columnReferences.append(indexToLetters(x) + str(y))
+        columnReferences = [
+            indexToLetters(x) + str(y) for y in range(cell1Row, cell2Row + 1)
+        ]
+
         references.append(columnReferences)
-        
+
     return references
 
 
@@ -138,17 +134,16 @@ def has_number(s):
 
 def convert_to_json_string(element):
 
-    if isinstance(element, str):
-        # string meant as string, escape
-        element = element.replace("\n","")
-
-        # if data is string without starting with =, add escape quotes
-        if len(element) > 0 and element[0] == '=':
-            return element[1:]
-        else:
-            return "\"" + element + "\""
-    else:
+    if not isinstance(element, str):
         return format(element, '.12f')
+    # string meant as string, escape
+    element = element.replace("\n","")
+
+    # if data is string without starting with =, add escape quotes
+    if len(element) > 0 and element[0] == '=':
+        return element[1:]
+    else:
+        return "\"" + element + "\""
 
 def df_to_list(df, include_headers = True):
     columns = list(df.columns.values)
@@ -161,7 +156,7 @@ def df_to_list(df, include_headers = True):
             column_data = [column] + column_data
 
         column_length = len(column_data)
-        data = data + column_data
+        data += column_data
     return (data,column_length, len(columns))
 
 def sheet(cell_range, data = None, headers = False, sheet_index = 0):
@@ -190,26 +185,25 @@ def sheet(cell_range, data = None, headers = False, sheet_index = 0):
 
                 cellColumnLetter = cell_range
                 cellColumnEndLetter = indexToLetters(letterToIndex(cellColumnLetter) + column_count - 1)
-                cell_range = cellColumnLetter + "1:" + cellColumnEndLetter + str(column_length)
-                
+                cell_range = f'{cellColumnLetter}1:{cellColumnEndLetter}{str(column_length)}'
+
             else:
 
                 cellColumnLetter = indexToLetters(getReferenceColumnIndex(cell_range))
                 startRow = getReferenceRowIndex(cell_range)
                 cellColumnEndLetter = indexToLetters(letterToIndex(cellColumnLetter) + column_count - 1)
                 cell_range = cellColumnLetter + str(startRow) + ":" + cellColumnEndLetter + str(column_length + startRow - 1)
-        
+
 
         # always convert cell to range
         if ":" not in cell_range:
-            if not has_number(cell_range):
-                if type(data) is list:
-                    cell_range = cell_range + "1:" + cell_range + str(len(data))
-                else :
-                    cell_range = cell_range + "1:" + cell_range + "1"
+            if has_number(cell_range):
+                cell_range = f'{cell_range}:{cell_range}'
+
+            elif type(data) is list:
+                cell_range = f'{cell_range}1:{cell_range}{len(data)}'
             else:
-                cell_range = cell_range + ":" + cell_range
-        
+                cell_range = f'{cell_range}1:{cell_range}1'
         if type(data) is list:
             
             newList = list(map(convert_to_json_string, data))
@@ -217,7 +211,7 @@ def sheet(cell_range, data = None, headers = False, sheet_index = 0):
             arguments =  ['RANGE', 'SETLIST', cell_range, str(sheet_index)]
 
             # append list
-            arguments = arguments + newList
+            arguments += newList
 
             json_object = {'arguments':arguments}
             json_string = ''.join(['#PARSE#', json.dumps(json_object),'#ENDPARSE#'])
@@ -229,15 +223,19 @@ def sheet(cell_range, data = None, headers = False, sheet_index = 0):
             data = {'arguments': ['RANGE', 'SETSINGLE', cell_range, str(sheet_index), ''.join(["=",str(data)])]}
             data = ''.join(['#PARSE#', json.dumps(data),'#ENDPARSE#'])
             real_print(data, flush=True, end='')
-    
-    # get data from sheet
+
     else:
         #convert non-range to range for get operation
         if ":" not in cell_range:
             cell_range = ':'.join([cell_range, cell_range])
 
         # in blocking fashion get latest data of range from Go
-        real_print("#DATA#" + str(sheet_index)+'!'+ cell_range + '#ENDPARSE#', end='', flush=True)
+        real_print(
+            f'#DATA#{str(sheet_index)}!{cell_range}#ENDPARSE#',
+            end='',
+            flush=True,
+        )
+
         getAndExecuteInputOnce()
         # if everything works, the exec command has filled sheet_data with the appropriate data
         # return data range as arrays
@@ -245,9 +243,11 @@ def sheet(cell_range, data = None, headers = False, sheet_index = 0):
 
         result = []
         for column in column_references:
-            column_data = []
-            for reference in column:
-                column_data.append(sheet_data[str(sheet_index)+'!'+reference])
+            column_data = [
+                sheet_data[f'{str(sheet_index)}!{reference}']
+                for reference in column
+            ]
+
             result.append(column_data)
 
         return pd.DataFrame(data=result).transpose()
